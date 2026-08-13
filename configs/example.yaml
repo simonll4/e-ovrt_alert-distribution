@@ -1,0 +1,13 @@
+# eovrt-distribute — config de ejemplo (sin credenciales: van por env)
+notification_policy:
+  cooldown_ms: 30000
+  key: [condition_id, source_id]
+channel:
+  mode: dry_run          # live requiere extra [mqtt] y broker Mosquitto
+  host: 127.0.0.1
+  port: 1883
+  topic_prefix: eovrt/alerts
+  qos: 1
+retry:
+  max_attempts: 3
+  wait_ms: 500

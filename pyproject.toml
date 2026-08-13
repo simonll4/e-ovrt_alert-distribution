@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eovrt-alert-distribution"
+version = "0.1.0"
+description = "E-OVRT-VDP alert distribution: decoupled consumer of confirmed alerts (spec 45)"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pydantic>=2.5",
+    "pyzmq>=25",
+    "msgpack>=1.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+mqtt = ["paho-mqtt>=2.0"]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[project.scripts]
+eovrt-distribute = "eovrt_distribution.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires external services (MQTT broker)"]
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

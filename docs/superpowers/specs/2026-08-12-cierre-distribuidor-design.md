@@ -8,7 +8,7 @@ Normativa: ADR-016, ADR-011 y spec 45 del repositorio hermano `docs/`.
 
 Cerrar las brechas propias del paquete que seguían abiertas después del relevamiento 114:
 crecimiento acumulativo de `notifications.jsonl` entre re-ejecuciones (C2), entorno reproducible
-en Python 3.11 (C4), imagen propia (B1) y una historia Git verificable (C5). No se agregan canales,
+en Python 3.11 (C4) y una historia Git verificable (C5). No se agregan canales,
 dashboard, reproceso automático de dead letters ni nuevas políticas de notificación.
 
 La integración con el runner y la webconsole se diseña en
@@ -45,18 +45,12 @@ El paquete declara `requires-python = ">=3.11,<3.12"` y Ruff apunta a `py311`. E
 recrea con Python 3.11 y se reinstala con los extras `mqtt,dev`. La restricción es deliberada: evita
 que CI, el entorno local y la imagen validen versiones distintas durante el cierre.
 
-## 4. Imagen del distribuidor
+## 4. Despliegue como proceso del host
 
-Se agrega `Dockerfile` multi-etapa simple basado en `python:3.11-slim`:
-
-- instala el paquete con el extra `mqtt`;
-- ejecuta como usuario no root;
-- usa `eovrt-distribute` como entrypoint;
-- no copia configuraciones con credenciales ni monta artefactos por defecto;
-- deja `alerts.jsonl`, config y directorio de salida como volúmenes/rutas provistas al ejecutar.
-
-La aceptación de la imagen es ejecutar `eovrt-distribute --help` y un replay dry-run sobre un
-fixture montado. La entrega MQTT real continúa dependiendo del broker externo.
+La topología vigente ejecuta media-plane, control-plane y el distribuidor como procesos del host.
+El runner crea un `eovrt-distribute` por experimento y lo termina junto con la corrida; no se agrega
+una imagen propia ni un daemon persistente. El broker MQTT continúa siendo una dependencia externa
+y puede ejecutarse con aMQTT o Mosquitto ligado a loopback.
 
 ## 5. Pruebas y criterio de terminado
 
@@ -66,8 +60,7 @@ fixture montado. La entrega MQTT real continúa dependiendo del broker externo.
   tres historias y siguen produciendo `skipped_duplicate`.
 - Test del distribuidor: `dead_letter.jsonl` viejo no reaparece en una ejecución nueva exitosa.
 - Suite completa, integración MQTT disponible y Ruff limpios bajo Python 3.11.
-- Build de la imagen y smoke si Docker está disponible; si el daemon no está disponible, se valida
-  sintaxis/contexto y se registra explícitamente la limitación operacional.
+- Smoke DBE del ejecutable real descubierto por el runner y prueba live contra un broker MQTT local.
 
 ## 6. Compatibilidad y errores
 
