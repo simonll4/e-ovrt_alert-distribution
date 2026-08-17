@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from eovrt_distribution.channels.mqtt import MqttChannel
 from eovrt_distribution.contracts.delivery import DeliveryRecord
 from eovrt_distribution.contracts.notification import NotificationEnvelope
-from eovrt_distribution.ledger import DeliveryLedger
+from eovrt_distribution.ledger import DeliveryLedger, archive_previous
 from eovrt_distribution.policy import NotificationPolicy
 
 
@@ -49,7 +49,7 @@ class Distributor:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         ledger = DeliveryLedger(self.out_dir / "notifications.jsonl")
         dead_letter_path = self.out_dir / "dead_letter.jsonl"
-        dead_letter_path.unlink(missing_ok=True)
+        archive_previous(dead_letter_path)
         counts: dict[str, int] = {}
         latencies_by_mode: dict[str, list[float]] = {}
         run_meta: dict = {}

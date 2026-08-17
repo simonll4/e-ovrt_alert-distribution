@@ -51,3 +51,21 @@ def test_check_does_not_consume_cooldown_until_delivery_is_marked(make_alert):
     assert policy.is_suppressed(second, now_wall_ms=0.0) is False
     policy.mark_notified(first, now_wall_ms=0.0)
     assert policy.is_suppressed(second, now_wall_ms=0.0) is True
+
+
+def test_cooldown_never_compares_media_time_against_wall_clock(make_alert):
+    policy = NotificationPolicy(cooldown_ms=30000)
+    env_media = _env(make_alert, timestamp_ms=1000.0)
+    env_wall = _env(make_alert, timestamp_ms=None)
+    policy.mark_notified(env_media, now_wall_ms=1.7e12)
+
+    assert not policy.is_suppressed(env_wall, now_wall_ms=1.7e12 + 1)
+
+
+def test_cooldown_media_base_still_suppresses_within_window(make_alert):
+    policy = NotificationPolicy(cooldown_ms=30000)
+    env_first = _env(make_alert, timestamp_ms=1000.0)
+    env_second = _env(make_alert, timestamp_ms=2000.0)
+    policy.mark_notified(env_first, now_wall_ms=0.0)
+
+    assert policy.is_suppressed(env_second, now_wall_ms=0.0)

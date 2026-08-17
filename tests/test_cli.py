@@ -47,7 +47,9 @@ def test_cli_replay_end_to_end(tmp_path, make_alert, capsys):
     assert code == 0
     summary3 = json.loads(capsys.readouterr().out)
     assert summary3["counts"] == {"skipped_duplicate": 2}
-    assert len((out / "notifications.jsonl").read_text().splitlines()) == size_after_second == 4
+    assert len((out / "notifications.jsonl").read_text().splitlines()) == size_after_second == 2
+    assert (out / "notifications.2.jsonl").exists()
+    assert (out / "notifications.1.jsonl").exists()
 
 
 def test_cli_replay_missing_file_exits_2(tmp_path):

@@ -62,19 +62,55 @@ def test_rehydrates_from_existing_file_preserving_latest_delivered(tmp_path):
     ledger = DeliveryLedger(path)
     assert ledger.seen("n1", "mqtt")
     assert ledger.seen("n2", "mqtt")
-    lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    assert len(lines) == 2
-    assert all(row["outcome"] == "delivered" for row in lines)
-    assert {row["notification_id"]: row["attempt"] for row in lines} == {"n1": 2, "n2": 1}
+    archived = tmp_path / "notifications.1.jsonl"
+    lines = [json.loads(line) for line in archived.read_text().splitlines() if line.strip()]
+    assert len(lines) == 5
+    assert {row["notification_id"] for row in lines} == {"n1", "n2"}
+    assert len([row for row in lines if row["outcome"] == "delivered"]) == 3
+    assert not path.exists()
 
 
-def test_existing_file_without_deliveries_is_compacted_to_empty(tmp_path):
+def test_reopen_archives_previous_file_intact_and_rehydrates(tmp_path):
     path = tmp_path / "notifications.jsonl"
     path.write_text(
         "\n".join(
             [
-                json.dumps(_rec("failed", nid="n1").model_dump(mode="json")),
-                json.dumps(_rec("dead_letter", nid="n1").model_dump(mode="json")),
+                json.dumps(
+                    {
+                        "notification_id": "n1",
+                        "channel": "mqtt",
+                        "outcome": "delivered",
+                        "attempt": 1,
+                        "control_run_id": "cr",
+                        "alert_id": "a1",
+                        "mode": "dry_run",
+                        "event_type": "control.alert.v1",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "notification_id": "n2",
+                        "channel": "mqtt",
+                        "outcome": "suppressed_cooldown",
+                        "attempt": 1,
+                        "control_run_id": "cr",
+                        "alert_id": "a2",
+                        "mode": "dry_run",
+                        "event_type": "control.alert.v1",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "notification_id": "n3",
+                        "channel": "mqtt",
+                        "outcome": "dead_letter",
+                        "attempt": 1,
+                        "control_run_id": "cr",
+                        "alert_id": "a3",
+                        "mode": "dry_run",
+                        "event_type": "control.alert.v1",
+                    }
+                ),
             ]
         )
         + "\n",
@@ -83,8 +119,94 @@ def test_existing_file_without_deliveries_is_compacted_to_empty(tmp_path):
 
     ledger = DeliveryLedger(path)
 
-    assert not ledger.seen("n1", "mqtt")
-    assert path.read_text(encoding="utf-8") == ""
+    assert ledger.seen("n1", "mqtt")
+    assert not ledger.seen("n2", "mqtt")
+    assert not ledger.seen("n3", "mqtt")
+    archived = tmp_path / "notifications.1.jsonl"
+    assert archived.exists()
+    assert len(archived.read_text(encoding="utf-8").splitlines()) == 3
+    assert not path.exists()
+
+
+def test_reopen_twice_increments_generation(tmp_path):
+    path = tmp_path / "notifications.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "notification_id": "a",
+                        "channel": "mqtt",
+                        "outcome": "delivered",
+                        "attempt": 1,
+                        "control_run_id": "cr",
+                        "alert_id": "a1",
+                        "mode": "dry_run",
+                        "event_type": "control.alert.v1",
+                    }
+                )
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    DeliveryLedger(path)
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "notification_id": "b",
+                        "channel": "mqtt",
+                        "outcome": "failed",
+                        "attempt": 1,
+                        "control_run_id": "cr",
+                        "alert_id": "b1",
+                        "mode": "dry_run",
+                        "event_type": "control.alert.v1",
+                    }
+                )
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    DeliveryLedger(path)
+
+    assert (tmp_path / "notifications.1.jsonl").exists()
+    assert (tmp_path / "notifications.2.jsonl").exists()
+
+
+def test_delivered_survives_across_multiple_generations(tmp_path):
+    """La deduplicación es acumulativa sobre TODAS las generaciones, no solo la última."""
+    path = tmp_path / "notifications.jsonl"
+
+    first = DeliveryLedger(path)
+    first.append(_rec("delivered", nid="n1"))
+
+    second = DeliveryLedger(path)  # archiva la generación de n1 -> .1
+    assert second.seen("n1", "mqtt")
+    second.append(_rec("failed", nid="n2"))
+
+    third = DeliveryLedger(path)  # archiva la generación de n2 -> .2
+
+    assert (tmp_path / "notifications.1.jsonl").exists()
+    assert (tmp_path / "notifications.2.jsonl").exists()
+    # el delivered vive en la generación .1: rehidratarlo exige leer todas, no la última
+    assert third.seen("n1", "mqtt")
+    assert not third.seen("n2", "mqtt")
+
+
+def test_existing_file_without_deliveries_is_archived_intact(tmp_path):
+    path = tmp_path / "notifications.jsonl"
+    path.write_text(
+        json.dumps(_rec("failed", nid="x").model_dump(mode="json")) + "\n",
+        encoding="utf-8",
+    )
+    ledger = DeliveryLedger(path)
+
+    assert not ledger.seen("x", "mqtt")
+    assert (tmp_path / "notifications.1.jsonl").read_text(encoding="utf-8").count("\n") == 1
 
 
 def test_appends_one_json_line_per_record(tmp_path):

@@ -6,6 +6,11 @@ import json
 import logging
 from typing import Literal
 
+try:  # pragma: no cover - dependency optional in dry-run environments
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
+
 from eovrt_distribution.channels.base import ChannelError, SendResult
 from eovrt_distribution.contracts.notification import NotificationEnvelope
 
@@ -30,6 +35,17 @@ class MqttChannel:
         self.qos = qos
         self.dry_run_published: list[tuple[str, str]] = []
 
+    def _reset_client(self) -> None:
+        client = getattr(self, "_client", None)
+        self._client = None
+        if client is None:
+            return
+        for op in ("loop_stop", "disconnect"):
+            try:
+                getattr(client, op)()
+            except (OSError, RuntimeError, ValueError):
+                logger.debug("fallo %s durante reset del cliente MQTT", op, exc_info=True)
+
     def topic_for(self, env: NotificationEnvelope) -> str:
         return f"{self.topic_prefix}/{env.severity}"
 
@@ -44,15 +60,14 @@ class MqttChannel:
         import os
         import time
 
-        try:
-            import paho.mqtt.client as mqtt
-        except ImportError as exc:
+        mqtt_module = mqtt
+        if mqtt_module is None:
             raise ChannelError(
                 "modo live requiere paho-mqtt: pip install 'eovrt-alert-distribution[mqtt]'"
-            ) from exc
+            )
         try:
             if getattr(self, "_client", None) is None:
-                client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+                client = mqtt_module.Client(callback_api_version=mqtt_module.CallbackAPIVersion.VERSION2)
                 user = os.environ.get("EOVRT_MQTT_USERNAME")
                 if user:
                     client.username_pw_set(user, os.environ.get("EOVRT_MQTT_PASSWORD"))
@@ -62,6 +77,7 @@ class MqttChannel:
             info = self._client.publish(topic, payload, qos=self.qos)
             info.wait_for_publish(timeout=5)
             if not info.is_published():
+                self._reset_client()
                 return SendResult(ok=False, error="publish timeout (sin PUBACK)")
             return SendResult(ok=True, puback_wall_ms=time.time() * 1000.0)
         except ChannelError:
@@ -69,18 +85,8 @@ class MqttChannel:
         except (OSError, RuntimeError, ValueError) as exc:
             # Broker caído, DNS, auth o estado inválido: el Distributor decide
             # el retry sin perder la causa original.
+            self._reset_client()
             return SendResult(ok=False, error=f"{type(exc).__name__}: {exc}")
 
     def close(self) -> None:
-        client = getattr(self, "_client", None)
-        if client is None:
-            return
-        try:
-            client.disconnect()
-        except (OSError, RuntimeError, ValueError):
-            logger.debug("falló disconnect MQTT durante el cierre", exc_info=True)
-        try:
-            client.loop_stop()
-        except (OSError, RuntimeError, ValueError):
-            logger.debug("falló loop_stop MQTT durante el cierre", exc_info=True)
-        self._client = None
+        self._reset_client()

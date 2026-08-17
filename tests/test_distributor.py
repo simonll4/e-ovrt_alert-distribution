@@ -66,6 +66,10 @@ def _outcomes(tmp_path):
     return [json.loads(line)["outcome"] for line in lines]
 
 
+def _count_rows(path):
+    return len([line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()])
+
+
 def test_happy_path_delivers_and_summarizes(tmp_path, make_alert):
     summary = _run(tmp_path, [make_alert(), make_alert(source_id="cam-02")])
     assert summary["counts"] == {"delivered": 2}
@@ -76,9 +80,47 @@ def test_happy_path_delivers_and_summarizes(tmp_path, make_alert):
 
 def test_dead_letter_is_reinitialized_each_run(tmp_path, make_alert):
     dead = tmp_path / "dead_letter.jsonl"
-    dead.write_text('{"outcome": "dead_letter"}\\n')
+    dead.write_text('{"outcome": "dead_letter"}\n')
     _run(tmp_path, [make_alert()])
+    assert (tmp_path / "dead_letter.1.jsonl").exists()
     assert not dead.exists()
+
+
+def test_rerun_over_same_out_dir_archives_dead_letter(tmp_path, make_alert):
+    out_dir = tmp_path
+    dead = out_dir / "dead_letter.jsonl"
+    dead.write_text('{"outcome": "dead_letter"}\n', encoding="utf-8")
+
+    _run(
+        out_dir,
+        [make_alert()],
+        channel=FailingChannel(fail_times=99),
+        max_attempts=1,
+        cooldown_ms=0.0,
+    )
+    assert dead.exists()
+    assert (out_dir / "dead_letter.1.jsonl").read_text(encoding="utf-8").count("\n") == 1
+    first_run_rows = _count_rows(out_dir / "notifications.jsonl")
+    assert first_run_rows == 2  # failed + dead_letter de la 1ª corrida
+
+    _run(
+        out_dir,
+        [make_alert()],
+        channel=FailingChannel(fail_times=99),
+        max_attempts=1,
+        cooldown_ms=0.0,
+    )
+    assert (out_dir / "dead_letter.2.jsonl").exists()
+    assert dead.exists()
+
+    # las filas de la 1ª corrida NO desaparecen: quedan archivadas junto a la vigente
+    archived = out_dir / "notifications.1.jsonl"
+    assert archived.exists()
+    assert _count_rows(archived) == first_run_rows
+    second_run_rows = _count_rows(out_dir / "notifications.jsonl")
+    assert second_run_rows == 2
+    total_rows = sum(_count_rows(path) for path in out_dir.glob("notifications*.jsonl"))
+    assert total_rows == first_run_rows + second_run_rows == 4
 
 
 def test_burst_suppressed_by_cooldown_and_recorded(tmp_path, make_alert):

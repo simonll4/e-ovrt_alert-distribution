@@ -2,8 +2,17 @@
 
 Clave de supresión (condition_id, source_id): para notificación asistiva lo
 relevante es "esta condición en esta cámara ya fue avisada", independiente
-del sujeto. Base de tiempo = media_timestamp_ms (coherente entre replay y
-live); fallback a wall-clock si la alerta no trae tiempo de media.
+del sujeto.
+
+Base de tiempo mixta. `_time()` devuelve el par `(base, timestamp)`: base
+``"media"`` cuando la alerta trae `media_timestamp_ms` (coherente entre replay
+y live: dos alertas del mismo video conservan su distancia temporal aunque el
+replay ocurra mucho después) y base ``"wall"`` cuando no lo trae, usando el
+wall-clock del momento del chequeo. La base se **registra junto al timestamp**
+en `mark_notified`, y ante bases incomparables (la guardada difiere de la
+actual) `is_suppressed` **nunca suprime**: restar wall-clock contra tiempo de
+media daría una diferencia sin significado, y el sesgo elegido es dejar pasar
+la notificación antes que suprimirla por una resta inválida.
 """
 
 from __future__ import annotations
@@ -19,10 +28,21 @@ class NotificationPolicy:
     ) -> None:
         self.cooldown_ms = cooldown_ms
         self.key_fields = key_fields
-        self._last_notified_ms: dict[tuple, float] = {}
+        self._last_notified_ms: dict[tuple, tuple[str, float]] = {}
 
     def _key(self, env: NotificationEnvelope) -> tuple:
         return tuple(getattr(env, field) for field in self.key_fields)
+
+    def _time(self, env: NotificationEnvelope, now_wall_ms: float) -> tuple[str, float]:
+        """Devuelve (`base`, `timestamp`) usada para comparación de cooldown.
+
+        Separamos explícitamente la base `media` y `wall`. Si una alerta llegó con
+        `media_timestamp_ms`, ese timestamp gobierna todo el cooldown de esa señal.
+        Si no llega, usamos el wall-clock del momento del check.
+        """
+        if env.media_timestamp_ms is not None:
+            return "media", env.media_timestamp_ms
+        return "wall", now_wall_ms
 
     def allow(self, env: NotificationEnvelope, now_wall_ms: float) -> bool:
         """Compatibilidad: comprueba y, si permite, consume la ventana."""
@@ -34,14 +54,18 @@ class NotificationPolicy:
     def is_suppressed(self, env: NotificationEnvelope, now_wall_ms: float) -> bool:
         if self.cooldown_ms <= 0:
             return False
-        t = env.media_timestamp_ms if env.media_timestamp_ms is not None else now_wall_ms
+        base, t = self._time(env, now_wall_ms)
         key = self._key(env)
         last = self._last_notified_ms.get(key)
-        return last is not None and (t - last) < self.cooldown_ms
+        if last is None:
+            return False
+        prior_base, last_t = last
+        if prior_base != base:
+            return False
+        return (t - last_t) < self.cooldown_ms
 
     def mark_notified(self, env: NotificationEnvelope, now_wall_ms: float) -> None:
         if self.cooldown_ms <= 0:
             return
-        t = env.media_timestamp_ms if env.media_timestamp_ms is not None else now_wall_ms
         key = self._key(env)
-        self._last_notified_ms[key] = t
+        self._last_notified_ms[key] = self._time(env, now_wall_ms)
