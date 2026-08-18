@@ -79,6 +79,15 @@ El runner inicia el CLI cuando la corrida lo solicita y lo termina con ella. Est
 logs y estado a un experimento concreto y evita mantener un daemon adicional. El costo es que no
 hay un servicio central con cola compartida o administración global.
 
+**✎ 2026-08-18** (*decía "evita mantener un daemon adicional", como si no
+existiera esa opción*): desde ADR-019 el daemon SÍ existe (`eovrt-distribute
+serve`, servicio HTTP en `:8082`) como camino adicional, no como reemplazo.
+Este subproceso-por-experimento sigue siendo el **default** del runner de la
+webconsole (ADR-018, no derogada); el costo descrito arriba sigue aplicando a
+ese camino. Lo que el servicio HTTP tampoco resuelve —una cola compartida o
+administración global entre corridas— sigue siendo cierto: el servicio admite
+**una corrida activa a la vez** (spec 45 §9.4), igual que el subproceso.
+
 ### Un canal
 
 El único transporte implementado es MQTT. Mantener un canal único permite cerrar contratos,
@@ -108,7 +117,7 @@ broker y en la gestión del entorno.
 | Dead letter | comando de reproceso, scheduler o cola consumible |
 | Estado | ledger central, coordinación multi-proceso o locks distribuidos |
 | Cooldown | persistencia entre procesos o sincronización entre hosts |
-| Operación | API HTTP, daemon permanente, dashboard propio o imagen Docker |
+| Operación | dashboard propio o imagen Docker propia (✎ 2026-08-18, corregido: esta fila decía también "API HTTP, daemon permanente" — ambos se ofrecen desde ADR-019 vía `eovrt-distribute serve`, `docs/specs/45-distribucion-alertas.md` §9; lo que sigue sin ofrecerse es el dashboard y la imagen Docker) |
 | Seguridad | TLS y autorización administrados por el paquete |
 | Recuperación live | retención propia del bus; el backfill requiere un archivo explícito |
 | Métricas | mezcla de latencia DBE con latencia live |

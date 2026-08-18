@@ -7,6 +7,15 @@
 y un directorio de salida, y espera su resumen. No existe un servidor HTTP ni un proceso global de
 distribución.
 
+**✎ 2026-08-18** (*decía "No existe un servidor HTTP ni un proceso global de
+distribución"*): eso ya no es cierto. Desde ADR-019, `eovrt-distribute serve`
+(FastAPI/uvicorn, extra `service`) expone el mismo pipeline como servicio HTTP
+de vida larga en `:8082` — ver §9.1/9.3 de `docs/specs/45-distribucion-alertas.md`
+y el detalle en "Modelo de despliegue" más abajo. El párrafo original describe
+correctamente el camino por subproceso (ADR-018), que sigue siendo el default
+del runner de la webconsole; el servicio HTTP es un camino adicional, no un
+reemplazo.
+
 La arquitectura mantiene aisladas cuatro responsabilidades: adquisición, adaptación contractual,
 decisión de entrega y transporte.
 
@@ -156,6 +165,12 @@ runner
 
 El proceso termina con la corrida. El broker es una dependencia separada que, en el laboratorio
 single-host, se liga a loopback. El repositorio no mantiene Dockerfile ni imagen propia.
+
+**✎ 2026-08-18:** este sigue siendo el default del runner de la webconsole (ADR-018), pero
+desde ADR-019 no es el único: `eovrt-distribute serve` expone el mismo pipeline como servicio
+HTTP de vida larga (`:8082`, extra `service`), sin Dockerfile ni imagen propia tampoco —eso
+sigue diferido (ADR-019 §4)—. El runner del BFF elige el camino por configuración
+(`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT`), no por default del paquete.
 
 ## Estructura del paquete
 

@@ -16,6 +16,20 @@ El distribuidor se integra mediante contratos y artefactos, no mediante imports 
 El distribuidor no necesita conocer las APIs HTTP de media-plane o control-plane. El runner absorbe
 esa coordinación y ejecuta el CLI como subprocesso.
 
+> **✎ 2026-08-18 (ADR-019 + ADR-020) — la frase de arriba ("ejecuta el CLI como
+> subprocesso") quedó SUPERADA como descripción del camino normal.** El distribuidor
+> expone su propio servicio HTTP (`eovrt-distribute serve`, puerto `:8082`, espejo del
+> control-plane — ver `docs/specs/45-distribucion-alertas.md` §9 en el repo documental) y
+> **ADR-020 derogó a ADR-018: el runner le habla por HTTP POR DEFAULT.** El subproceso
+> quedó como **fallback operativo** (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`) y
+> **dejó de ser un patrón de acople**. En el camino normal el runner no
+> ejecuta ningún subproceso, hace `POST /api/runs` y pollea `GET /api/runs/{id}` hasta
+> estado terminal (`succeeded` es el único éxito; `failed`/`cancelled` se propagan como
+> error), y el preflight sondea `GET /healthz` en vez de exigir el binario local. Los
+> contratos de esta página (envelopes, buses, summary) son **idénticos por ambos caminos**
+> — verificado con la misma corrida por CLI y por HTTP produciendo `distribution_summary.json`
+> byte-equivalente salvo latencias.
+
 ## Dos buses diferentes
 
 La topología live usa dos flujos ZeroMQ con responsabilidades distintas:
@@ -83,6 +97,12 @@ runs:
 
 El campo `service` identifica el plano en el manifiesto, pero el runner resuelve el ejecutable
 `eovrt-distribute` instalado o el del `.venv` del repositorio hermano.
+
+> **✎ 2026-08-18 (ADR-019 + ADR-020):** por default el runner **ya no resuelve ningún
+> ejecutable**: le habla al servicio en `EOVRT_CONSOLE_DISTRIBUTION_SERVICE_URL` (default
+> `http://localhost:8082`). El ejecutable sólo se resuelve en el **fallback**
+> (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`). El manifiesto no cambia — la
+> selección del transporte es por entorno, no por manifiesto.
 
 ## Integración EBE / live
 

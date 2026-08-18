@@ -59,7 +59,28 @@ def main(argv: list[str] | None = None) -> int:
     p_live.add_argument("--config", default=None)
     p_live.add_argument("--idle-timeout-ms", type=_positive_finite_float, default=None)
 
+    p_serve = sub.add_parser("serve", help="servicio HTTP (ADR-019)")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8082)
+
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        try:
+            import uvicorn
+
+            from eovrt_distribution.service.app import create_app
+        except ImportError:
+            print(
+                "serve requiere el extra 'service' (fastapi/uvicorn): "
+                "instalá con pip install -e \".[service]\"",
+                file=sys.stderr,
+            )
+            return 1
+
+        uvicorn.run(create_app(), host=args.host, port=args.port)
+        return 0
+
     cfg = DistributionConfig.load(Path(args.config) if args.config else None)
 
     if args.command == "replay":

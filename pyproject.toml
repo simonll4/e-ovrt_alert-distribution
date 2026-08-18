@@ -16,7 +16,13 @@ dependencies = [
 
 [project.optional-dependencies]
 mqtt = ["paho-mqtt>=2.0"]
-dev = ["pytest>=8", "ruff>=0.4"]
+service = ["fastapi>=0.110", "uvicorn[standard]"]
+# dev incluye el extra `service`: buena parte de la suite (test_service_api,
+# test_service_live, test_run_manager, test_run_ids, test_cli_serve) ejercita el
+# servicio HTTP (ADR-019) y necesita fastapi/uvicorn para siquiera importar.
+# ✎ 2026-08-18: antes `dev` no lo arrastraba y la instalacion documentada en el
+# README (`pip install -e ".[mqtt,dev]"`) dejaba ~40 tests sin poder importar.
+dev = ["pytest>=8", "ruff>=0.4", "httpx", "eovrt-alert-distribution[service]"]
 
 [project.scripts]
 eovrt-distribute = "eovrt_distribution.cli:main"

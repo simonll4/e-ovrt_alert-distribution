@@ -25,9 +25,29 @@ El broker MQTT se configura aparte en `configs/example.yaml` (`channel.host` y
 `channel.port`); usuario y contraseña van exclusivamente por
 `EOVRT_MQTT_USERNAME` / `EOVRT_MQTT_PASSWORD`.
 
+**✎ 2026-08-18: el módulo también puede correr como servicio HTTP** (ADR-019,
+`docs/specs/45-distribucion-alertas.md` §9), espejo del control-plane:
+
+    pip install -e ".[service,dev]"
+    eovrt-distribute serve --host 127.0.0.1 --port 8082
+
+`POST /api/runs` dispara una corrida (`replay` o `live`) y devuelve su id; `GET
+/api/runs/{id}` sirve el mismo `distribution_summary.json` que imprime el CLI;
+`POST /api/runs/{id}/cancel` la detiene. Requiere el extra `service`
+(fastapi/uvicorn) — sin él, `serve` falla con un mensaje explícito en vez de un
+traceback. El runner de la webconsole puede hablarle por este camino en vez de
+criar un subproceso (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=http`).
+
 El despliegue vigente ejecuta este módulo como proceso del host, igual que los
 planos media/control. No se mantiene una imagen Docker propia ni un daemon
 persistente de distribución: el runner crea un proceso por experimento.
+
+**✎ 2026-08-18** (*decía "no se mantiene [...] un daemon persistente de
+distribución"*): eso ya no es cierto — ver "servicio HTTP" arriba (ADR-019).
+El daemon persistente (`serve`) coexiste con el subproceso por experimento,
+que sigue siendo el default de la webconsole (ADR-018, no derogada). Lo que
+sigue sin existir es una **imagen Docker propia** (containerización diferida
+con causa, ver ADR-019 §4).
 
 ## Tests
 
