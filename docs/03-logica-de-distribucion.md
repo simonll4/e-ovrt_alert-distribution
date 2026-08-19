@@ -197,8 +197,12 @@ La fuente live termina por una de estas razones, reflejada en `source_stats.term
 - `requested_stop`: cancelación cooperativa.
 
 El canal se cierra en un bloque `finally`, incluso si una excepción interrumpe el procesamiento. En
-el camino normal, después de agotar la fuente se construye y persiste el summary y se imprime el
-mismo objeto por stdout.
+el camino normal, después de agotar la fuente se construye y persiste el summary. Cómo se observa
+ese summary depende de la superficie de ejecución:
+
+- por CLI (`replay`/`live`), el mismo objeto se imprime en una línea por stdout;
+- bajo `serve` no hay stdout que observar: el summary se lee vía `GET /api/runs/{id}` cuando la
+  corrida alcanza un estado terminal (`succeeded`, `failed` o `cancelled`).
 
 ## Siguiente lectura
 

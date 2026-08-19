@@ -51,7 +51,9 @@ El servicio deliberadamente no:
 - resuelve o reabre episodios del control-plane;
 - altera el estado persistido por el productor;
 - ofrece un dashboard propio;
-- permanece activo como daemon compartido entre experimentos;
+- coordina múltiples corridas simultáneas: el daemon HTTP (`eovrt-distribute serve`, ADR-019)
+  existe y es compartido entre experimentos, pero admite una corrida activa a la vez y no ofrece
+  cola compartida ni administración global;
 - coordina múltiples distribuidores sobre un ledger común;
 - promete entrega exactly-once a un consumidor remoto.
 

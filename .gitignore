@@ -4,3 +4,13 @@ __pycache__/
 runs/
 .pytest_cache/
 .ruff_cache/
+notas.txt
+.superpowers/
+.claude/
+*.py[cod]
+.env
+.env.*
+dist/
+build/
+.mypy_cache/
+.DS_Store

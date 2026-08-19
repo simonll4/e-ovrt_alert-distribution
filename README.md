@@ -6,7 +6,11 @@ alertas ya confirmadas por el control-plane: las recibe (bus
 notificación (cooldown, ADR-011), entrega por MQTT y registra intento y
 resultado. Nunca recalcula severidad ni crea alertas.
 
-Diseño: `docs/superpowers/specs/2026-07-18-alert-distribution-design.md`.
+Diseño original (pre-servicio): `docs/superpowers/specs/2026-07-18-alert-distribution-design.md`.
+El servicio HTTP y su acople con la webconsole están decididos en **ADR-019**
+(`docs/decisiones/adr-019-servicio-http-distribucion.md`) y **ADR-020**
+(`docs/decisiones/adr-020-http-como-unico-acople-de-distribucion.md`), en el
+repo documental hermano `docs/`.
 
 Documentación técnica vigente: [`docs/README.md`](docs/README.md). Explica el
 propósito del servicio en la plataforma, su arquitectura, la lógica de
@@ -25,8 +29,9 @@ El broker MQTT se configura aparte en `configs/example.yaml` (`channel.host` y
 `channel.port`); usuario y contraseña van exclusivamente por
 `EOVRT_MQTT_USERNAME` / `EOVRT_MQTT_PASSWORD`.
 
-**✎ 2026-08-18: el módulo también puede correr como servicio HTTP** (ADR-019,
-`docs/specs/45-distribucion-alertas.md` §9), espejo del control-plane:
+**El módulo también corre como servicio HTTP** (ADR-019, spec 45 §9 —
+`docs/specs/45-distribucion-alertas.md` en el repo documental hermano `docs/`,
+igual que las ADR), espejo del control-plane:
 
     pip install -e ".[service,dev]"
     eovrt-distribute serve --host 127.0.0.1 --port 8082
@@ -35,19 +40,21 @@ El broker MQTT se configura aparte en `configs/example.yaml` (`channel.host` y
 /api/runs/{id}` sirve el mismo `distribution_summary.json` que imprime el CLI;
 `POST /api/runs/{id}/cancel` la detiene. Requiere el extra `service`
 (fastapi/uvicorn) — sin él, `serve` falla con un mensaje explícito en vez de un
-traceback. El runner de la webconsole puede hablarle por este camino en vez de
-criar un subproceso (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=http`).
+traceback. **Este es el camino por default del runner de la webconsole
+(ADR-020)**: le habla al servicio por HTTP; el subproceso por experimento quedó
+como **fallback operativo** (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`)
+y dejó de ser un patrón de acople. Setear `=http` es un no-op: ya es el default.
 
-El despliegue vigente ejecuta este módulo como proceso del host, igual que los
-planos media/control. No se mantiene una imagen Docker propia ni un daemon
-persistente de distribución: el runner crea un proceso por experimento.
+El despliegue vigente ejecuta este módulo como servicio del host en `:8082`,
+igual que los planos media (`:8080`) y control (`:8081`); el CLI
+(`replay`/`live`) se conserva para el camino offline y la ejecución directa.
+Desde 2026-08-19 el repo también mantiene una imagen Docker propia
+(`infra/docker/Dockerfile`) para el compose de la plataforma.
 
-**✎ 2026-08-18** (*decía "no se mantiene [...] un daemon persistente de
-distribución"*): eso ya no es cierto — ver "servicio HTTP" arriba (ADR-019).
-El daemon persistente (`serve`) coexiste con el subproceso por experimento,
-que sigue siendo el default de la webconsole (ADR-018, no derogada). Lo que
-sigue sin existir es una **imagen Docker propia** (containerización diferida
-con causa, ver ADR-019 §4).
+**✎ Historia (2026-08-18):** hasta esa fecha no existía daemon persistente y el
+runner creaba un proceso por experimento (ADR-018). ADR-019 introdujo el
+servicio HTTP y **ADR-020 derogó a ADR-018**: HTTP pasó a ser el default y el
+subproceso quedó sólo como fallback operativo.
 
 ## Tests
 

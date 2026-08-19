@@ -32,14 +32,17 @@ alerta confirmada + política + historial de entrega
        notificación entregada, suprimida o agotada
 ```
 
-La misma lógica se usa en dos formas de ejecución:
+La misma lógica se expone por tres superficies de ejecución:
 
 - `replay` (DBE): consume un `alerts.jsonl` ya producido.
 - `live` (EBE): consume el bus de alertas mientras la corrida está activa y puede completar el
   comienzo mediante backfill.
+- `serve` (servicio HTTP en `:8082`, ADR-019): daemon de vida larga que dispara esas mismas
+  corridas (`replay` o `live`) vía `POST /api/runs`; es el camino por default del runner de la
+  webconsole (ADR-020).
 
-Ambas formas ejecutan el mismo `Distributor`, producen los mismos contratos y escriben los mismos
-artefactos.
+Las tres superficies ejecutan el mismo `Distributor`, producen los mismos contratos y escriben los
+mismos artefactos.
 
 ## Fuentes de autoridad
 
@@ -49,7 +52,7 @@ La documentación se contrastó con:
 - `tests/`, comportamiento de regresión;
 - `configs/example.yaml`, configuración pública;
 - `pyproject.toml`, runtime y dependencias;
-- spec 45, ADR-005, ADR-011 y ADR-016 del repositorio hermano `docs/`;
+- spec 45, ADR-005, ADR-011, ADR-016, ADR-019 y ADR-020 del repositorio hermano `docs/`;
 - integración vigente del runner y del generador de reportes en
   `e-ovrt_experimental-setup`.
 

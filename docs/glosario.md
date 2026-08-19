@@ -37,6 +37,14 @@ Resultado terminal de una notificación que agotó todos los intentos. Se regist
 
 Véase [Publicación y retry](03-logica-de-distribucion.md#5-publicación-y-retry).
 
+## `distribution_run_id`
+
+Identificador de una corrida disparada a través del servicio HTTP. Lo genera
+`service/run_ids.py` al aceptar un `POST /api/runs` y es la clave para consultar estado y summary
+(`GET /api/runs/{id}`) o cancelar (`POST /api/runs/{id}/cancel`).
+
+Véase [Servicio HTTP](02-arquitectura.md#servicio-http).
+
 ## EBE
 
 Evaluación basada en eventos (*event-based evaluation*). Corresponde al modo `live`, en el que el
@@ -51,6 +59,15 @@ topic, clave, secuencia e instante de publicación. No debe confundirse con
 `NotificationEnvelope`, que es el mensaje de dominio publicado por MQTT.
 
 Véase [Contratos y artefactos](04-contratos-y-artefactos.md#transporte-live-busenvelopev1).
+
+## Estados de corrida
+
+Ciclo de vida de una corrida bajo el servicio HTTP: `running` mientras el pipeline procesa,
+`succeeded` al terminar con summary válido, `failed` ante un error y `cancelled` tras una
+cancelación cooperativa. Sólo `succeeded` cuenta como éxito para el runner; `failed` y `cancelled`
+se propagan como error.
+
+Véase [Servicio HTTP](02-arquitectura.md#servicio-http).
 
 ## Idempotencia
 
@@ -109,6 +126,15 @@ de patrones y `experiment_id` correlaciona los planos en el experimento paraguas
 
 Véase [Cadena contractual](04-contratos-y-artefactos.md#cadena-contractual).
 
+## Servicio de distribución
+
+Daemon HTTP de vida larga expuesto por `eovrt-distribute serve` en `:8082` (ADR-019), espejo del
+control-plane. Dispara corridas `replay`/`live` vía `POST /api/runs`, sirve estado y summary por
+`GET /api/runs/{id}` y admite una corrida activa a la vez. Es el camino por default del runner de
+la webconsole (ADR-020).
+
+Véase [Servicio HTTP](02-arquitectura.md#servicio-http).
+
 ## Source
 
 Abstracción iterable que entrega `SourcedAlert`. Puede ser un JSONL, un bus ZeroMQ o una fuente
@@ -122,3 +148,12 @@ Latencia de distribución registrada únicamente para entregas. Se separa por `l
 `wall_clock_dbe` para impedir que una medición de replay se interprete como latencia operacional.
 
 Véase [Latencia](03-logica-de-distribucion.md#6-latencia).
+
+## Transporte del runner
+
+Camino por el que el runner de la webconsole ejecuta la distribución. El default es **HTTP**
+contra el servicio de `:8082` (ADR-020, que derogó a ADR-018); el **subproceso** CLI sobrevive
+sólo como fallback operativo, seleccionable con `EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`.
+Ambos transportes producen artefactos y contratos idénticos.
+
+Véase [Integración con la plataforma](05-integracion-con-la-plataforma.md#dependencias-entre-planos).

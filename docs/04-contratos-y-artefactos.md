@@ -260,10 +260,12 @@ orden de reproceso.
 
 ### `distribution_summary.json`
 
-Objeto JSON indentado con el resumen. Se escribe al final de un recorrido normal y la CLI imprime
-el mismo objeto en una línea por stdout. El runner valida schema, forma, valores no negativos,
-finitud de métricas y equivalencia exacta entre stdout y archivo antes de considerar exitosa la
-distribución.
+Objeto JSON indentado con el resumen. Se escribe al final de un recorrido normal; la CLI imprime
+el mismo objeto en una línea por stdout. El runner valida schema, forma, valores no negativos y
+finitud de métricas antes de considerar exitosa la distribución. La verificación de equivalencia
+exacta entre stdout y archivo existe sólo en el camino por CLI (fallback subprocess): en el camino
+HTTP por default (ADR-020) no hay stdout — el runner pollea `GET /api/runs/{id}` y valida el
+summary que sirve el servicio, que es el mismo objeto persistido.
 
 ## Ubicación consolidada
 

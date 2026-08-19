@@ -2,25 +2,34 @@
 
 ## Vista general
 
-`e-ovrt_alert-distribution` es un paquete Python 3.11 con una frontera de proceso expuesta por
-`eovrt-distribute`. El runner inicia una instancia por experimento, le entrega una fuente de alertas
-y un directorio de salida, y espera su resumen. No existe un servidor HTTP ni un proceso global de
-distribución.
+`e-ovrt_alert-distribution` es un paquete Python 3.11 con dos fronteras de proceso:
 
-**✎ 2026-08-18** (*decía "No existe un servidor HTTP ni un proceso global de
-distribución"*): eso ya no es cierto. Desde ADR-019, `eovrt-distribute serve`
-(FastAPI/uvicorn, extra `service`) expone el mismo pipeline como servicio HTTP
-de vida larga en `:8082` — ver §9.1/9.3 de `docs/specs/45-distribucion-alertas.md`
-y el detalle en "Modelo de despliegue" más abajo. El párrafo original describe
-correctamente el camino por subproceso (ADR-018), que sigue siendo el default
-del runner de la webconsole; el servicio HTTP es un camino adicional, no un
-reemplazo.
+- el **servicio HTTP** `eovrt-distribute serve` (FastAPI/uvicorn, extra `service`), daemon de vida
+  larga en `:8082` que expone el pipeline vía `POST /api/runs` (ADR-019 — ver §9.1/9.3 de
+  `docs/specs/45-distribucion-alertas.md` en el repo documental). Es el camino por default del
+  runner de la webconsole (ADR-020): el runner dispara la corrida y pollea `GET /api/runs/{id}`
+  hasta su estado terminal;
+- el **CLI** `eovrt-distribute replay|live`, que ejecuta una corrida por proceso. Sigue siendo el
+  camino offline y de ejecución directa, y sobrevive como fallback operativo del runner
+  (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`).
+
+**✎ Historia (2026-08-18):** hasta ADR-019 no existía servidor HTTP ni proceso global de
+distribución — el runner iniciaba una instancia CLI por experimento (ADR-018, derogada por
+ADR-020).
 
 La arquitectura mantiene aisladas cuatro responsabilidades: adquisición, adaptación contractual,
 decisión de entrega y transporte.
 
 ```mermaid
 flowchart LR
+    subgraph Entradas[Fronteras de proceso]
+        HTTP[API HTTP :8082<br/>POST /api/runs] --> RunManager[RunManager]
+        CLI[CLI replay / live]
+    end
+
+    RunManager --> Distributor
+    CLI --> Distributor
+
     subgraph Sources[Fuentes]
         JSONL[JsonlReplaySource]
         ZMQ[ZmqSource<br/>backfill + SUB]
@@ -57,7 +66,23 @@ argumentos, carga `DistributionConfig`, construye la fuente y conecta las depend
 `distribution_summary.json`.
 
 La CLI no implementa reglas de negocio: ambos subcomandos convergen en `_build()` y usan el mismo
-nucleo.
+nucleo. El tercer subcomando, `serve`, no ejecuta corridas por sí mismo: levanta el servicio HTTP
+descrito a continuación (falla con un mensaje explícito si falta el extra `service`).
+
+### Servicio HTTP
+
+`src/eovrt_distribution/service/` implementa el daemon de `:8082` (ADR-019):
+
+- `app.py` construye la aplicación FastAPI y monta los routers;
+- `routers/health.py` expone `/healthz` y `/readyz`;
+- `routers/config.py` expone la configuración efectiva;
+- `routers/runs.py` expone `POST /api/runs` (dispara `replay` o `live`), `GET /api/runs/{id}`
+  (estado y summary) y `POST /api/runs/{id}/cancel` (parada cooperativa);
+- `run_request.py` valida el pedido; `run_ids.py` genera el `distribution_run_id`;
+- `settings.py` resuelve el entorno del servicio (`EOVRT_DISTRIBUTION_RUNS_DIR`);
+- `run_manager.py` ejecuta la corrida: compone **el mismo grafo que el CLI** (fuente, política,
+  ledger, canal y `Distributor`), admite una corrida activa a la vez y transiciona por los estados
+  `running` / `succeeded` / `failed` / `cancelled`.
 
 ### Fuentes
 
@@ -143,6 +168,8 @@ suprimidas, siempre que no ocurra un fallo fatal de I/O o una excepción no recu
 Las capas externas dependen del núcleo, no al revés:
 
 - el CLI conoce configuración, fuentes, política y canal;
+- el servicio HTTP no duplica reglas: `RunManager` compone el mismo grafo que el CLI (fuente,
+  política, ledger, canal y `Distributor`) y delega toda la lógica de distribución en el núcleo;
 - el distribuidor conoce las interfaces concretas recibidas, pero no conoce al runner ni a la
   webconsole;
 - los contratos no dependen de MQTT ni de ZeroMQ;
@@ -153,30 +180,38 @@ externos.
 
 ## Modelo de despliegue
 
-La unidad de despliegue vigente es un proceso del host por experimento:
+Hay dos unidades de despliegue:
 
 ```text
-runner
+# default de la plataforma (ADR-019/ADR-020): servicio HTTP de vida larga
+eovrt-distribute serve                       :8082
+  └── RunManager (una corrida activa a la vez)
+        ├── conexión opcional al bus ZeroMQ
+        ├── conexión opcional al broker MQTT
+        └── escritura en el out_dir del request (runs/exp_<id>/distribution/)
+
+# fallback operativo del runner / camino offline y ejecución directa
+runner (EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess) o ejecución manual
   └── eovrt-distribute replay|live
         ├── conexión opcional al bus ZeroMQ
         ├── conexión opcional al broker MQTT
         └── escritura en runs/exp_<id>/distribution/
 ```
 
-El proceso termina con la corrida. El broker es una dependencia separada que, en el laboratorio
-single-host, se liga a loopback. El repositorio no mantiene Dockerfile ni imagen propia.
+En el camino por subproceso el proceso termina con la corrida; bajo `serve`, la corrida termina
+pero el daemon persiste. El broker es una dependencia separada que, en el laboratorio single-host,
+se liga a loopback. Desde 2026-08-19 el repositorio mantiene una imagen Docker propia
+(`infra/docker/Dockerfile`) para el compose de la plataforma.
 
-**✎ 2026-08-18:** este sigue siendo el default del runner de la webconsole (ADR-018), pero
-desde ADR-019 no es el único: `eovrt-distribute serve` expone el mismo pipeline como servicio
-HTTP de vida larga (`:8082`, extra `service`), sin Dockerfile ni imagen propia tampoco —eso
-sigue diferido (ADR-019 §4)—. El runner del BFF elige el camino por configuración
-(`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT`), no por default del paquete.
+**✎ Historia (2026-08-18):** hasta esa fecha la única unidad de despliegue era el subproceso por
+experimento (ADR-018). ADR-019 introdujo el servicio y ADR-020 derogó a ADR-018, invirtiendo el
+default del runner.
 
 ## Estructura del paquete
 
 ```text
 src/eovrt_distribution/
-├── cli.py                 frontera de proceso
+├── cli.py                 frontera de proceso (replay, live, serve)
 ├── config.py              configuración estricta
 ├── distributor.py         orquestación del pipeline
 ├── ledger.py              idempotencia persistida
@@ -188,6 +223,16 @@ src/eovrt_distribution/
 ├── contracts/
 │   ├── notification.py    control.notification.v1
 │   └── delivery.py        control.delivery.v1
+├── service/               servicio HTTP :8082 (ADR-019)
+│   ├── app.py             construcción de la app FastAPI
+│   ├── run_manager.py     ciclo de vida de la corrida (una activa a la vez)
+│   ├── run_request.py     validación del pedido POST /api/runs
+│   ├── run_ids.py         generación de distribution_run_id
+│   ├── settings.py        entorno del servicio (EOVRT_DISTRIBUTION_RUNS_DIR)
+│   └── routers/
+│       ├── health.py      /healthz y /readyz
+│       ├── config.py      configuración efectiva expuesta
+│       └── runs.py        POST /api/runs, GET /api/runs/{id}, cancel
 └── transport/
     ├── envelope.py        bus.envelope.v1
     └── zmq_source.py      fuente live y backfill

@@ -7,28 +7,25 @@ El distribuidor se integra mediante contratos y artefactos, no mediante imports 
 | Componente | Relación con distribución |
 |---|---|
 | control-plane | produce `control.alert.v1`, `alerts.jsonl` y el bus de alertas |
-| runner experimental | crea el proceso, ordena la secuencia y valida el summary |
+| runner experimental | dispara la corrida por HTTP (`POST :8082/api/runs`), ordena la secuencia y valida el summary; subproceso CLI sólo como fallback |
 | broker MQTT | recibe `control.notification.v1` con QoS 1 |
 | consolidación | preserva `distribution/` como sibling de `media/` y `control/` |
 | generador de reporte | incorpora summary y último outcome por alerta |
 | webconsole | muestra conteos, p95, estado y outcome de notificación |
 
 El distribuidor no necesita conocer las APIs HTTP de media-plane o control-plane. El runner absorbe
-esa coordinación y ejecuta el CLI como subprocesso.
+esa coordinación: por default (ADR-020) le habla al servicio de distribución (`eovrt-distribute
+serve`, puerto `:8082`, espejo del control-plane — ver `docs/specs/45-distribucion-alertas.md` §9
+en el repo documental). El preflight sondea `GET /healthz`, el disparo es `POST /api/runs` y el
+runner pollea `GET /api/runs/{id}` hasta estado terminal (`succeeded` es el único éxito;
+`failed`/`cancelled` se propagan como error). El subproceso CLI quedó como **fallback operativo**
+(`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`) y **dejó de ser un patrón de acople**. Los
+contratos de esta página (envelopes, buses, summary) son **idénticos por ambos caminos** —
+verificado con la misma corrida por CLI y por HTTP produciendo `distribution_summary.json`
+byte-equivalente salvo latencias.
 
-> **✎ 2026-08-18 (ADR-019 + ADR-020) — la frase de arriba ("ejecuta el CLI como
-> subprocesso") quedó SUPERADA como descripción del camino normal.** El distribuidor
-> expone su propio servicio HTTP (`eovrt-distribute serve`, puerto `:8082`, espejo del
-> control-plane — ver `docs/specs/45-distribucion-alertas.md` §9 en el repo documental) y
-> **ADR-020 derogó a ADR-018: el runner le habla por HTTP POR DEFAULT.** El subproceso
-> quedó como **fallback operativo** (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`) y
-> **dejó de ser un patrón de acople**. En el camino normal el runner no
-> ejecuta ningún subproceso, hace `POST /api/runs` y pollea `GET /api/runs/{id}` hasta
-> estado terminal (`succeeded` es el único éxito; `failed`/`cancelled` se propagan como
-> error), y el preflight sondea `GET /healthz` en vez de exigir el binario local. Los
-> contratos de esta página (envelopes, buses, summary) son **idénticos por ambos caminos**
-> — verificado con la misma corrida por CLI y por HTTP produciendo `distribution_summary.json`
-> byte-equivalente salvo latencias.
+> **✎ Historia (2026-08-18):** hasta ADR-019/ADR-020 el único camino era el subproceso por
+> experimento (ADR-018, derogada por ADR-020).
 
 ## Dos buses diferentes
 
@@ -57,7 +54,7 @@ sequenceDiagram
     participant R as Runner
     participant M as media-plane
     participant C as control-plane
-    participant D as eovrt-distribute
+    participant D as servicio de distribución (:8082)
     participant F as Artefactos
     participant P as Reporte
 
@@ -66,12 +63,17 @@ sequenceDiagram
     R->>C: replay de detecciones
     C-->>R: alerts.jsonl y summary
     R->>F: consolidar media/ y control/
-    R->>D: replay --alerts control/alerts.jsonl
+    R->>D: POST /api/runs (mode replay, alerts control/alerts.jsonl)
     D->>F: escribir distribution/*
-    D-->>R: summary por stdout
-    R->>R: validar stdout == distribution_summary.json
+    R->>D: polling GET /api/runs/{id}
+    D-->>R: estado terminal + summary
+    R->>R: validar schema y forma del summary
     R->>P: generar report.json
 ```
+
+En el fallback por subproceso (camino offline, `EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`),
+`POST /api/runs` y el polling se reemplazan por la ejecución de `eovrt-distribute replay` y la
+lectura del summary por stdout, con la validación adicional stdout == archivo.
 
 El runner exige que `runs.distribution.mode` coincida con `runs.control.mode`. Si la consolidación o
 la distribución solicitada falla, marca el experimento como no exitoso y
@@ -95,14 +97,12 @@ runs:
     mode: replay
 ```
 
-El campo `service` identifica el plano en el manifiesto, pero el runner resuelve el ejecutable
-`eovrt-distribute` instalado o el del `.venv` del repositorio hermano.
-
-> **✎ 2026-08-18 (ADR-019 + ADR-020):** por default el runner **ya no resuelve ningún
-> ejecutable**: le habla al servicio en `EOVRT_CONSOLE_DISTRIBUTION_SERVICE_URL` (default
-> `http://localhost:8082`). El ejecutable sólo se resuelve en el **fallback**
-> (`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`). El manifiesto no cambia — la
-> selección del transporte es por entorno, no por manifiesto.
+El campo `service` identifica el plano en el manifiesto. Por default el runner no resuelve ningún
+ejecutable: le habla al servicio en `EOVRT_CONSOLE_DISTRIBUTION_SERVICE_URL` (default
+`http://localhost:8082`). El ejecutable `eovrt-distribute` — instalado o el del `.venv` del
+repositorio hermano — sólo se resuelve en el **fallback**
+(`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`). El manifiesto no cambia entre caminos: la
+selección del transporte es por entorno, no por manifiesto.
 
 ## Integración EBE / live
 
@@ -113,34 +113,39 @@ retiene eventos enviados antes de la suscripción.
 sequenceDiagram
     participant R as Runner
     participant C as control-plane
-    participant D as eovrt-distribute
+    participant D as servicio de distribución (:8082)
     participant M as media-plane
     participant B as Broker MQTT
 
     R->>C: iniciar live con alert_bus habilitado
     C-->>R: control_run_id y suscripción de entrada confirmada
-    R->>D: live --endpoint :5558 --control-run-id ...
-    Note over R,D: el runner cede el event loop para iniciar el consumidor
+    R->>D: POST /api/runs (mode live, endpoint :5558, control_run_id)
+    Note over R,D: el runner cede el event loop para que el consumidor arranque
     R->>M: iniciar media con bus habilitado
     M->>C: detecciones por :5557
     C->>D: control.alert.v1.<run_id> por :5558
     D->>B: control.notification.v1, QoS 1
     B-->>D: PUBACK
     C->>D: run.lifecycle.v1.<run_id> / run_finished
-    D-->>R: summary y salida normal
+    R->>D: polling GET /api/runs/{id}
+    D-->>R: succeeded + summary
 ```
 
 Cuando existe distribución, el runner habilita `alert_bus` en la configuración efectiva del
-control-plane y eleva `wait_for_subscriber_ms` al menos a 10 segundos. Luego crea la tarea del
-distribuidor y le da una oportunidad explícita de comenzar antes de iniciar media.
+control-plane y eleva `wait_for_subscriber_ms` al menos a 10 segundos. Luego dispara la corrida de
+distribución y le da una oportunidad explícita de comenzar antes de iniciar media. En el fallback
+por subproceso la secuencia es la misma, con `eovrt-distribute live --endpoint :5558
+--control-run-id ...` en lugar del `POST`.
 
-El runner vigente pasa `control_run_id` y endpoint al CLI, pero no pasa `--backfill` en su secuencia
-live. La capacidad de backfill existe en el CLI para una ejecución directa o una integración que
-proporcione el archivo; no debe interpretarse como recuperación automática del runner actual.
+El runner vigente pasa `control_run_id` y endpoint en el request (o al CLI en el fallback), pero no
+pasa backfill en su secuencia live. La capacidad de backfill existe para una ejecución directa o
+una integración que proporcione el archivo; no debe interpretarse como recuperación automática del
+runner actual.
 
-Si media o control fallan, el runner cancela y termina el subprocesso de distribución. Si el
-distribuidor falla o su summary no valida, `distribution_status` queda en `failed` y el resultado
-global no es exitoso.
+Si media o control fallan, el runner cancela la corrida de distribución: en el camino default llama
+`POST /api/runs/{id}/cancel` (best-effort) para que el servicio detenga la corrida activa; en el
+fallback termina el subproceso. Si el distribuidor falla o su summary no valida,
+`distribution_status` queda en `failed` y el resultado global no es exitoso.
 
 ## Topics MQTT
 
@@ -187,16 +192,19 @@ no sustituye la latencia real de una alerta en vivo.
 
 ## Webconsole
 
-La webconsole no consulta al broker ni al proceso de distribución. Lee el `report.json` consolidado
-y muestra:
+La webconsole nunca consulta al broker MQTT. Durante la corrida, su BFF (el runner) sí le habla al
+servicio de distribución por HTTP — preflight `GET /healthz`, disparo `POST /api/runs` y polling de
+`GET /api/runs/{id}` hasta estado terminal (ADR-020). Para mostrar una corrida, en cambio, lee el
+`report.json` consolidado:
 
 - conteos por outcome;
 - p95 y estado de `t_alert-notification`;
 - alertas inválidas omitidas;
 - último outcome de entrega en la columna “Notificada”.
 
-Esta lectura desacoplada permite abrir una corrida terminada aunque los procesos y el broker ya no
-estén activos.
+Esta lectura desacoplada permite abrir una corrida terminada aunque el servicio de distribución y
+el broker ya no estén activos. El costo del acople HTTP es el inverso: cuando la distribución está
+habilitada, la webconsole exige el servicio arriba para poder correr.
 
 ## Ejecución directa
 

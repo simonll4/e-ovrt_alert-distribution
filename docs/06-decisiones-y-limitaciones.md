@@ -73,20 +73,19 @@ No es un journal transaccional multi-writer. Dos procesos que escriban simultán
 `--out-dir` pueden interferir; la plataforma asigna un directorio de distribución por experimento y
 un solo proceso propietario.
 
-### Un proceso por experimento
+### Servicio persistente con una corrida activa a la vez
 
-El runner inicia el CLI cuando la corrida lo solicita y lo termina con ella. Esto liga artefactos,
-logs y estado a un experimento concreto y evita mantener un daemon adicional. El costo es que no
-hay un servicio central con cola compartida o administración global.
-
-**✎ 2026-08-18** (*decía "evita mantener un daemon adicional", como si no
-existiera esa opción*): desde ADR-019 el daemon SÍ existe (`eovrt-distribute
-serve`, servicio HTTP en `:8082`) como camino adicional, no como reemplazo.
-Este subproceso-por-experimento sigue siendo el **default** del runner de la
-webconsole (ADR-018, no derogada); el costo descrito arriba sigue aplicando a
-ese camino. Lo que el servicio HTTP tampoco resuelve —una cola compartida o
-administración global entre corridas— sigue siendo cierto: el servicio admite
+Desde ADR-019 el daemon existe (`eovrt-distribute serve`, servicio HTTP en `:8082`) y desde ADR-020
+es el camino por default del runner de la webconsole: **ADR-018 quedó derogada** y el
+subproceso-por-experimento sobrevive sólo como fallback operativo
+(`EOVRT_CONSOLE_DISTRIBUTION_TRANSPORT=subprocess`). En ambos caminos los artefactos, logs y estado
+quedan ligados a un experimento concreto (el `out_dir` de la corrida). Lo que el servicio HTTP
+deliberadamente no resuelve es una cola compartida o administración global entre corridas: admite
 **una corrida activa a la vez** (spec 45 §9.4), igual que el subproceso.
+
+**✎ Historia (2026-08-18):** esta sección se llamaba "Un proceso por experimento" y describía el
+modelo previo a ADR-019/ADR-020, en el que el runner iniciaba el CLI con cada corrida y lo
+terminaba con ella (ADR-018).
 
 ### Un canal
 
@@ -100,8 +99,9 @@ pero esa evolución no está implementada.
 - Las credenciales MQTT no aparecen en YAML: se leen de variables de entorno.
 - La configuración de ejemplo apunta a `127.0.0.1`.
 - El broker anónimo usado en laboratorio debe permanecer ligado a loopback.
-- El runner omite stderr del subprocesso al construir errores para evitar filtrar configuración
-  sensible.
+- El runner omite stderr del subproceso al construir errores para evitar filtrar configuración
+  sensible (aplica sólo al camino de fallback por subproceso; en el camino HTTP por default no hay
+  stderr que capturar).
 
 El servicio no implementa TLS, rotación de secretos, autorización por topic ni almacenamiento
 seguro de credenciales. Un despliegue fuera del host local debe aportar esas capacidades en el
@@ -117,7 +117,7 @@ broker y en la gestión del entorno.
 | Dead letter | comando de reproceso, scheduler o cola consumible |
 | Estado | ledger central, coordinación multi-proceso o locks distribuidos |
 | Cooldown | persistencia entre procesos o sincronización entre hosts |
-| Operación | dashboard propio o imagen Docker propia (✎ 2026-08-18, corregido: esta fila decía también "API HTTP, daemon permanente" — ambos se ofrecen desde ADR-019 vía `eovrt-distribute serve`, `docs/specs/45-distribucion-alertas.md` §9; lo que sigue sin ofrecerse es el dashboard y la imagen Docker) |
+| Operación | dashboard propio (✎ esta fila decía también "API HTTP, daemon permanente" — se ofrecen desde ADR-019 vía `eovrt-distribute serve`, `docs/specs/45-distribucion-alertas.md` §9 — y "imagen Docker propia" — existe desde 2026-08-19 en `infra/docker/Dockerfile` para el compose de la plataforma) |
 | Seguridad | TLS y autorización administrados por el paquete |
 | Recuperación live | retención propia del bus; el backfill requiere un archivo explícito |
 | Métricas | mezcla de latencia DBE con latencia live |
