@@ -49,7 +49,9 @@ El despliegue vigente ejecuta este módulo como servicio del host en `:8082`,
 igual que los planos media (`:8080`) y control (`:8081`); el CLI
 (`replay`/`live`) se conserva para el camino offline y la ejecución directa.
 Desde 2026-08-19 el repo también mantiene una imagen Docker propia
-(`infra/docker/Dockerfile`) para el compose de la plataforma.
+(`infra/docker/Dockerfile`) para el compose de la plataforma. **Ese empaquetado está definido
+y validado por configuración, no verificado en ejecución**: no se construyó la imagen ni se
+corrió la prueba integral de arranque, así que no acredita portabilidad ejecutada.
 
 **✎ Historia (2026-08-18):** hasta esa fecha no existía daemon persistente y el
 runner creaba un proceso por experimento (ADR-018). ADR-019 introdujo el
@@ -83,3 +85,8 @@ relativa equivalente desde este repo.
 de conexión observado. El canal no propaga la excepción de red — la devuelve como
 `SendResult(ok=False, error=...)` —, así que el test inspecciona `result.error`
 además de capturar excepciones.
+
+## Licencia
+
+El código y la documentación de este repositorio se distribuyen bajo licencia MIT
+(ver [`LICENSE`](LICENSE)).
